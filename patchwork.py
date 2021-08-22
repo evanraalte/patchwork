@@ -22,7 +22,7 @@ class CentralTimeBoard:
     leather_positions: Set = field(default_factory=lambda: set({26, 32, 38, 44, 50}))
 
 
-OrientationType = namedtuple("OrientationType", "orientation mirror")
+Orientation = namedtuple("Orientation", "rotation mirror")
 Coordinate = namedtuple("Coordinate", "x y")
 
 
@@ -45,7 +45,7 @@ class IllegalRotationException(Exception):
 
 
 class Shape:
-    base = OrientationType(orientation=Rotation.CW0, mirror=False)
+    base = Orientation(rotation=Rotation.CW0, mirror=False)
 
     def __str__(self):
         buf = ""
@@ -59,9 +59,9 @@ class Shape:
             buf += '\n'
         return buf
 
-    def __init__(self, shape_list):
+    def __init__(self, shape_list: List[List[int]]):
         self.coordinates: Set[Coordinate] = {}
-        orientations = set([Rotation.CW0])
+        rotations = set([Rotation.CW0])
         mirror_states = set([False])
 
         self.coordinates[self.base] = {
@@ -73,16 +73,16 @@ class Shape:
 
         for r in Rotation:
             if self.coordinates[self.base] != self.rotate_cw(self.coordinates[self.base], r):  # can be rotated 90 cw
-                orientations.add(r)
+                rotations.add(r)
 
-        for c in orientations:
+        for c in rotations:
             for m in mirror_states:
                 if (c, m) == self.base:
                     continue
                 t_shape = self.rotate_cw(self.mirror(self.coordinates[self.base], m), c)
                 if t_shape in self.coordinates.values():
                     continue
-                self.coordinates[OrientationType(c, m)] = t_shape
+                self.coordinates[Orientation(c, m)] = t_shape
 
     @classmethod
     def offset_to_zero(cls, coordinates: Set[Coordinate]):  # Align x_min and y_min to 0,0
@@ -136,15 +136,14 @@ class Patch:
 class PlacementException(Exception):
     """Thrown if a patch doesn't fit on the quiltboard"""
 
-    def __init__(self, patch, location, orientation, mirror):
+    def __init__(self, patch, location, orientation):
         self.patch = patch
         self.location = location
         self.orientation = orientation
-        self.mirror = mirror
         super().__init__("Patch does not fit on QuiltBoard")
 
     def __str__(self):
-        return f'{self.patch=}, {self.location=}, {self.orientation=}, {self.mirror=}'
+        return f'{self.patch=}, {self.location=}, {self.orientation=}'
 
 
 class QuiltBoard:
@@ -160,15 +159,15 @@ class QuiltBoard:
             buf += '\n'
         return buf
 
-    def add_patch(self, patch: Patch, location, orientation, mirror):
-        if not self.fits_patch(patch, location, orientation, mirror):
-            raise self.PlacementException(patch, location, orientation, mirror)
+    def add_patch(self, patch: Patch, location: Coordinate, orientation: Orientation):
+        if not self.fits_patch(patch, location, orientation):
+            raise PlacementException(patch, location, orientation)
         self.button_cnt += patch.income
-        self.empty_tiles -= patch.shape.patch.shape.offset(location)
-        print(f"added patch at, {location=}")
+        self.empty_tiles -= patch.shape.offset(location, patch.shape.coordinates[orientation])
 
-    def fits_patch(self, patch: Patch, location):
-        return all(p in self.empty_tiles for p in patch.shape.offset(location))
+    def fits_patch(self, patch: Patch, location: Coordinate, orientation: Orientation) -> bool:
+        coordinates = patch.shape.offset(location, patch.shape.coordinates[orientation])
+        return all(c in self.empty_tiles for c in coordinates)
 
     @staticmethod
     def _generate_7x7(x_offset, y_offset):
@@ -219,14 +218,14 @@ class Player:
     final_move_played: bool = field(init=False, default=False)
     move_finished: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.opponent_id = 1 - self.id
         self.quilt_board = QuiltBoard()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.id=} {self.buttons=} {self.position=}"
 
-    def try_increment_position(self, steps, patch_position=None):
+    def increment_position(self, steps, patch_position=None) -> None:
         buttons = self.buttons
         final_move_played = False
         move_finished = False
@@ -243,10 +242,8 @@ class Player:
                 buttons = self.buttons + self.quilt_board.button_cnt
             if i in self.central_time_board.leather_positions:
                 assert patch_position is not None
-                if not self.quilt_board.fits_patch(self.patch_circle.leather_patch, patch_position):
-                    raise PlacementException(patch_position)
-                self.central_time_board.leather_positions.remove(i)  # take the patch
                 self.quilt_board.add_patch(self.patch_circle.leather_patch, patch_position)  # place it on the board
+                self.central_time_board.leather_positions.remove(i)  # take the patch
 
         self.buttons = buttons
         self.final_move_played = final_move_played
@@ -254,13 +251,13 @@ class Player:
         self.position += steps
         self.central_time_board.player_positions[self.id] = self.position
 
-    def add_buttons(self, num):
+    def add_buttons(self, num) -> None:
         self.buttons = self.buttons + num
 
-    def rm_buttons(self, num):
+    def rm_buttons(self, num) -> None:
         self.buttons = self.buttons - num
 
-    def buy_patch(self, relative_patch_position: int):
+    def buy_patch(self, relative_patch_position: int) -> Patch:
         patch = self.patch_circle.get(relative_patch_position, pop=False)
         if patch.cost > self.buttons:
             raise InsufficientButtonsException()
@@ -268,21 +265,22 @@ class Player:
             self.rm_buttons(patch.cost)
             return self.patch_circle.get(relative_patch_position, pop=True)
 
-    def play_advance_and_receive_buttons(self, patch_position):
+    def play_advance_and_receive_buttons(self, patch_position) -> bool:
         position_other_player = self.central_time_board.player_positions[self.opponent_id]
         diff = position_other_player - self.position
         assert diff >= 0
 
         try:
-            self.try_increment_position(diff + 1, patch_position)
+            self.increment_position(diff + 1, patch_position)
             self.add_buttons(diff + 1)
-        except PlacementException as e:
-            raise e
+            return True
+        except PlacementException:
+            return False
 
     # validity of move to be determined in arbiter
     def play_take_and_place_a_patch(
-        self, relative_patch_position: int, location: Coordinate, orientation: OrientationType
-    ):
+        self, relative_patch_position: int, location: Coordinate, orientation: Orientation
+    ) -> bool:
         # Check that it is actually our turn
         position_other_player = self.central_time_board.player_positions[self.opponent_id]
         diff = position_other_player - self.position
@@ -291,16 +289,20 @@ class Player:
         try:
             patch = self.buy_patch(relative_patch_position)
             self.quilt_board.add_patch(patch, location, orientation)
-            self.try_increment_position(patch.time_penalty)
-        except (PlacementException, InsufficientButtonsException) as e:
-            raise e
+            self.increment_position(patch.time_penalty)
+            return True
+        except (PlacementException, InsufficientButtonsException):
+            return False
 
-    def get_points(self):
+    def get_points(self) -> int:
         return self.buttons - 2 * self.quilt_board.get_empty_tiles()
 
 
 class Arbiter:
     # Needs to know player positions
+    def __eq__(self, other):
+        return self.__dict__ == other.__dict__
+
     def switch_player(self, player_id=None) -> Player:
         if player_id is not None:
             self.player_id = player_id
@@ -335,30 +337,26 @@ class Arbiter:
             next_moves = set()
             for tile in self.p.quilt_board.empty_tiles:
                 # 1
-                try:
-                    _self = self.copy()
-                    _self.p.play_advance_and_receive_buttons(tile)
-                    if _self.p.move_finished:
-                        _self.p = _self.switch_player()
+                _self = self.copy()
+                valid_move = _self.p.play_advance_and_receive_buttons(tile)
+                if _self.p.move_finished:
+                    _self.p = _self.switch_player()
+                if valid_move:
+                    print(f'play_advance_and_receive_buttons {tile=}')
+
                     next_moves.add(_self)  # add this state as a valid move
-                except PlacementException:
-                    pass  # No valid move
 
                 # 2
-                for i in range(1, 3 + 1):
-                    try:
-                        _self = self.copy()
-                        orientations = _self.patch_circle.get(i, pop=False).coordinates.keys()
-                        for orientation in orientations:
-                            try:
-                                _self.p.play_take_and_place_a_patch(i, tile, orientation)
-                                if _self.p.move_finished:
-                                    _self.p = _self.switch_player()
-                                next_moves.add(_self)  # add this state as a valid move
-                            except (PlacementException, InsufficientButtonsException):
-                                pass
-                    except PlacementException:
-                        pass  # No valid move
+                # for i in range(1, 3 + 1):
+                #     _self = self.copy()
+                #     orientations = _self.patch_circle.get(i, pop=False).shape.coordinates.keys()
+                #     for orientation in orientations:
+                #         valid_move = _self.p.play_take_and_place_a_patch(i, tile, orientation)
+                #         if _self.p.move_finished:
+                #             _self.p = _self.switch_player()
+                #         if valid_move:
+                #             # print(f'play_take_and_place_a_patch {i=}, {tile=}, {orientation=}')
+                #             next_moves.add(_self)
             print(f"possible moves in this state: {len(next_moves)}")
             pass
 
