@@ -47,6 +47,9 @@ class IllegalRotationException(Exception):
 class Shape:
     base = Orientation(rotation=Rotation.CW0, mirror=False)
 
+    def __eq__(self, o: Shape) -> bool:
+        str(self) == str(o)
+
     def __str__(self):
         buf = ""
         for coords in self.coordinates.values():
@@ -129,6 +132,14 @@ class Patch:
     sl: InitVar[List[List[int]]] = None
     shape: Shape = field(init=False)
 
+    def __eq__(self, o: Patch) -> bool:
+        return (
+            self.time_penalty == o.time_penalty
+            and self.cost == o.cost
+            and self.income == o.income
+            and self.shape == o.shape
+        )
+
     def __post_init__(self, sl):
         self.shape = Shape(sl)
 
@@ -150,6 +161,9 @@ class QuiltBoard:
     def __init__(self):
         self.empty_tiles = {(x, y) for y in range(0, 9) for x in range(0, 9)}
         self.button_cnt = 0
+
+    def __eq__(self, o: QuiltBoard) -> bool:
+        return self.empty_tiles == o.empty_tiles and self.button_cnt == o.button_cnt
 
     def __str__(self):
         buf = ""
@@ -189,7 +203,7 @@ class PatchCircle:
 
     leather_patch = Patch(time_penalty=0, cost=0, income=0, sl=[[1]])
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.neutral_token = 0
         # read patches from yaml
         with open("patches.yaml") as f:
@@ -197,6 +211,9 @@ class PatchCircle:
         self.patches = [Patch(**patch) for patch in patches]
         # randomize order
         pass
+
+    def __eq__(self, o: PatchCircle) -> bool:
+        return self.neutral_token == o.neutral_token and self.patches == o.patches
 
     def get(self, relative_patch_position, pop=False) -> Patch:
         idx = (self.neutral_token + relative_patch_position) % len(self.patches)
@@ -217,6 +234,9 @@ class Player:
     quilt_board: QuiltBoard = field(init=False)
     final_move_played: bool = field(init=False, default=False)
     move_finished: bool = False
+
+    def __eq__(self, o) -> bool:
+        return self.buttons == o.buttons and self.position == o.position and self.quilt_board == o.quilt_board
 
     def __post_init__(self) -> None:
         self.opponent_id = 1 - self.id
@@ -300,8 +320,13 @@ class Player:
 
 class Arbiter:
     # Needs to know player positions
-    def __eq__(self, other):
-        return self.__dict__ == other.__dict__
+    def __eq__(self, o: Arbiter) -> bool:
+        return (
+            self.central_time_board == o.central_time_board
+            and self.players == o.players
+            and self.patch_circle == o.patch_circle
+            and self.player_id == o.player_id
+        )
 
     def switch_player(self, player_id=None) -> Player:
         if player_id is not None:
@@ -334,31 +359,31 @@ class Arbiter:
                 break
 
             # Otherwise, calculate all next moves
-            next_moves = set()
+            next_moves: List[Arbiter] = []
             for tile in self.p.quilt_board.empty_tiles:
                 # 1
                 _self = self.copy()
                 valid_move = _self.p.play_advance_and_receive_buttons(tile)
                 if _self.p.move_finished:
                     _self.p = _self.switch_player()
-                if valid_move:
-                    print(f'play_advance_and_receive_buttons {tile=}')
-
-                    next_moves.add(_self)  # add this state as a valid move
+                if valid_move and (_self not in next_moves):
+                    # print(f'play_advance_and_receive_buttons {tile=}')
+                    print(f'{_self.players[0].quilt_board}')
+                    next_moves.append(_self)  # add this state as a valid move
 
                 # 2
-                # for i in range(1, 3 + 1):
+                # for i in range(0, 1):
                 #     _self = self.copy()
                 #     orientations = _self.patch_circle.get(i, pop=False).shape.coordinates.keys()
                 #     for orientation in orientations:
                 #         valid_move = _self.p.play_take_and_place_a_patch(i, tile, orientation)
                 #         if _self.p.move_finished:
                 #             _self.p = _self.switch_player()
-                #         if valid_move:
-                #             # print(f'play_take_and_place_a_patch {i=}, {tile=}, {orientation=}')
-                #             next_moves.add(_self)
+                #         if valid_move and (_self not in next_moves):
+                #             next_moves.append(_self)
+                #             print(f'{_self.players[0].quilt_board}')
             print(f"possible moves in this state: {len(next_moves)}")
-            pass
+            return
 
         pass
 
