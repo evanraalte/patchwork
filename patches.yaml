@@ -1,0 +1,22 @@
+- time_penalty: 4
+  cost: 1
+  income: 1
+  sl:    [[0,1,0],
+          [0,1,0],
+          [1,1,1],
+          [0,1,0],
+          [0,1,0]]
+- time_penalty: 1
+  cost: 7
+  income: 1
+  sl:    [[1],
+          [1],
+          [1],
+          [1],
+          [1]]
+- time_penalty: 6
+  cost: 4
+  income: 2
+  sl:    [[1,0],
+          [1,0],
+          [1,1]]

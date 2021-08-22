@@ -1,0 +1,4 @@
+# Black config
+[tool.black]
+skip-string-normalization = true
+line-length = 119
